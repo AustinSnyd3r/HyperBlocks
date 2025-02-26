@@ -62,8 +62,8 @@ __global__ void mergerHyperBlocks(const int seedIndex, int *readSeedQueue, const
             // first we build our combined list.
             for (int i = 0; i < numAttributes;){
                 if (i + 3 < numAttributes){
-                    fourMinFloats = hyperBlockMins4[i];
-                    fourMaxFloats = hyperBlockMaxes4[i];
+                    fourMinFloats = hyperBlockMins4[i / 4];
+                    fourMaxFloats = hyperBlockMaxes4[i / 4];
                     // merge our block mins and maxes using the four floats instead of just one at a time
                     thisBlockCombinedMins[i] = fminf(seedBlockMins[i], fourMinFloats.x);
                     thisBlockCombinedMins[i + 1] = fminf(seedBlockMins[i + 1], fourMinFloats.y);

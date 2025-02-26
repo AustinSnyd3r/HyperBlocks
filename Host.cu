@@ -663,31 +663,17 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
     // we have our multithreading happen here at this level. set the device to class % deviceCount
     #pragma omp parallel for num_threads(deviceCount)
     */
-
     for (int classN = 0; classN < NUM_CLASSES; classN++) {
         
         // set our device based on class. this way even single threaded we use multiple GPUs
         // MORE MULTI GPU BUSINESS
         //cudaSetDevice(classN % deviceCount);
         
-        // Find best occupancy
-        int sharedMemSize = 2 * FIELD_LENGTH * sizeof(float) + sizeof(int);
-        int minGridSize, blockSize;
-        cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, mergerHyperBlocks, sharedMemSize, 0);
-
         int totalDataSetSizeFlat = numPoints * FIELD_LENGTH;
         int sizeWithoutHBpoints = ((data_with_skips[classN].size() + numBlocksOfEachClass[classN]) * FIELD_LENGTH);
         if (data_with_skips[classN].empty()) {
             sizeWithoutHBpoints = numBlocksOfEachClass[classN] * FIELD_LENGTH;
         }
-
-        // Compute grid size to cover all elements. we already know our ideal block size from before.
-        int gridSize = ((sizeWithoutHBpoints / FIELD_LENGTH) + blockSize - 1) / blockSize;
-
-        //cout << "Grid size: " << gridSize << endl;
-        //cout << "Block size: " << blockSize << endl;
-        //cout << "Shared memory size: " << sharedMemSize << endl;
-
         // Allocate host memory
         vector<float> hyperBlockMinsC(sizeWithoutHBpoints);
         vector<float> hyperBlockMaxesC(sizeWithoutHBpoints);
@@ -770,7 +756,17 @@ void merger_cuda(const vector<vector<vector<float>>>& data_with_skips, const vec
 
         cout << "Launched a kernel for class: " << classN << endl;
 
-        // funky wap to swap the readQueue and writeQueue
+        // Find best occupancy
+        int sharedMemSize = 2 * FIELD_LENGTH * sizeof(float) + sizeof(int);
+        int minGridSize, blockSize;
+        cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, mergerHyperBlocks, sharedMemSize, 0);
+
+        // numblocks is how many HBs we have, and we are doing a ceiling on that so that
+        int gridSize = (numBlocks + blockSize - 1) / blockSize;
+        cout << "Grid size: " << gridSize << endl;
+        cout << "Block size: " << blockSize << endl;
+
+        // funky way to swap the readQueue and writeQueue
         int* queues[2] = {d_seedQueue, d_writeSeedQueue};
         for(int i = 0; i < numBlocks; i++){
             // swap between the two queues
@@ -857,7 +853,6 @@ int main(int argc, char* argv[]) {
     cout << "Number elements in class 0: " << data[0].size() << endl;
     cout << "Number elements in class 1: " << data[1].size() << endl;
  	// normalize the data
-
 
     minMaxNormalization(data);
 	//print3DVector(data);
