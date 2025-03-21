@@ -1964,6 +1964,10 @@ void runInteractive() {
                 // Prepend the directory (adjust PATH_SEPARATOR as needed)
                 string fullPath = "datasets" + string(PATH_SEPARATOR) + testingDataFileName;
 
+                // clear our testing maps so that we can run multiple tests per run
+                CLASS_MAP_TESTING.clear();
+                CLASS_MAP_TESTING_INT.clear();
+                
                 testData = dataSetup(fullPath, CLASS_MAP_TESTING, CLASS_MAP_TESTING_INT);
                 // Normalize and reorder testing data as needed.
                 normalizeTestSet(testData, minValues, maxValues);
@@ -1982,7 +1986,7 @@ void runInteractive() {
             case 4: { // IMPORT EXISTING HYPERBLOCKS
                 cout << "Enter existing hyperblocks file name: " << endl;
                 getline(cin, hyperBlocksImportFileName);
-                // hyperBlocks = loadBasicHBsFromCSV(hyperBlocksImportFileName);
+                hyperBlocks = loadBasicHBsFromCSV(hyperBlocksImportFileName);
                 cout << "HyperBlocks imported from file " << hyperBlocksImportFileName << " successfully" << endl;
                 waitForEnter();
                 break;
@@ -1990,7 +1994,7 @@ void runInteractive() {
             case 5: { // EXPORT HYPERBLOCKS
                 cout << "Enter the file to save HyperBlocks to: " << endl;
                 getline(cin, hyperBlocksExportFileName);
-                // saveBasicHBsToCSV(hyperBlocks, hyperBlocksExportFileName);
+                saveBasicHBsToCSV(hyperBlocks, hyperBlocksExportFileName);
                 break;
             }
             case 6: { // GENERATE NEW HYPERBLOCKS
