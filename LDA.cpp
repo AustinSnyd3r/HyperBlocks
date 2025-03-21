@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cassert>
 #include <limits>
-
+#include <future>
 using namespace std;
 
 // Matrix inverse using naive Gauss-Jordan elimination
@@ -81,8 +81,8 @@ inline float dotProduct(const vector<float>& a, const vector<float>& b) {
 
 // Define a struct to hold both the weight vector and its bias.
 struct LDAClassifier {
-    vector<float> w;
-    float bias;
+    vector<float> w; // the coefficients of the classifier
+    float bias; // offsets the threshold back to 0 so that we are comparing fairly
 };
 
 /**
@@ -191,7 +191,6 @@ int predictClass(const vector<LDAClassifier>& classifiers, const vector<float>& 
     return bestClass;
 }
 
-
 // testMultiClassAccuracy: loops over each sample in inputData (labeled by class),
 // predicts its class using predictClass, and computes overall accuracy.
 void testMultiClassAccuracy(const vector<LDAClassifier>& classifiers,
@@ -223,30 +222,42 @@ void testMultiClassAccuracy(const vector<LDAClassifier>& classifiers,
  * run a 2-class LDA for each class i vs. all other classes combined.
  *
  * Returns a vector of LDAClassifier, one per class.
- */
+*/
 vector<vector<float>> linearDiscriminantAnalysis(const vector<vector<vector<float>>>& inputData) {
     int numClasses = inputData.size();
-    vector<LDAClassifier> classifiers(numClasses); // one classifier per class
+    vector<future<LDAClassifier>> futures;
+    futures.reserve(numClasses);
 
-    // For each class i, gather its samples in classA
-    // and gather all other samples in classB
+    // Launch each binary classifier computation asynchronously.
     for (int i = 0; i < numClasses; i++) {
-        // classA = the samples of class i
-        const auto& classA = inputData[i];
-        // classB = union of samples of all other classes
-        vector<vector<float>> classB;
-        for (int j = 0; j < numClasses; j++) {
-            if (j == i) continue; // skip class i
-            classB.insert(classB.end(), inputData[j].begin(), inputData[j].end());
-        }
-        // Compute the 2-class LDA classifier for i vs. rest
-        classifiers[i] = computeBinaryLDA(classA, classB);
+        futures.push_back(std::async(std::launch::async, [&, i]() -> LDAClassifier {
+            // classA = samples of class i.
+            const auto& classA = inputData[i];
+            // Build classB as the union of all samples from other classes.
+            vector<vector<float>> classB;
+            for (int j = 0; j < numClasses; j++) {
+                if (j == i) continue;
+                classB.insert(classB.end(), inputData[j].begin(), inputData[j].end());
+            }
+            // Compute and return the binary LDA classifier for class i vs. rest.
+            return computeBinaryLDA(classA, classB);
+        }));
     }
+
+    // Retrieve the results from each future.
+    vector<LDAClassifier> classifiers;
+    classifiers.reserve(numClasses);
+    for (int i = 0; i < numClasses; i++) {
+        classifiers.push_back(futures[i].get());
+    }
+
+    // Extract separation vectors (weight vectors) from the classifiers.
     vector<vector<float>> separationVectors;
-    for (LDAClassifier &classifier : classifiers) {
+    for (const LDAClassifier &classifier : classifiers) {
         separationVectors.push_back(classifier.w);
     }
 
     testMultiClassAccuracy(classifiers, inputData);
     return separationVectors;
 }
+

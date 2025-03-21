@@ -76,7 +76,7 @@ vector<vector<vector<float>>> reorderTestingDataset(
     // For each (className → trainingIndex) in the training map
     for (const auto& entry : CLASS_MAP_TRAINING) {
         const std::string& className   = entry.first;
-        int               trainingIndex = entry.second;
+        int trainingIndex = entry.second;
 
         // Find the same class in the testing map
         auto it = CLASS_MAP_TESTING.find(className);
@@ -522,13 +522,6 @@ void generateHBs(vector<vector<vector<float>>>& data, vector<HyperBlock>& hyperB
 
  */
 
-
-
-
-
-
-
-
 void printDataset(const vector<vector<vector<float>>>& vec) {
     for (int i = 0; i < vec.size(); i++) {
         cout << "Class " << i << ":" << endl;
@@ -691,9 +684,6 @@ vector<HyperBlock> loadBasicHBsFromCSV(const string& fileName) {
     return hyperBlocks;
 }
 
-
-
-
 /**
 * Find the min/max values in each column of data across the dataset.
 * Can use this in normalization and also for making sure test set is normalized with
@@ -710,9 +700,6 @@ void findMinMaxValuesInDataset(const vector<vector<vector<float>>>& dataset, vec
         }
     }
 }
-
-
-
 
 /**
 * A function to normalize the test set using the given mins/maxes that were used to normalize the initial set
@@ -1971,12 +1958,16 @@ void runInteractive() {
             }
             case 2: { // IMPORT TESTING DATA
                 cout << "Enter testing data filename: " << endl;
-                system("ls");
+
+                system("ls datasets");  // list available datasets
                 getline(cin, testingDataFileName);
-                testData = dataSetup(testingDataFileName.c_str(), CLASS_MAP_TESTING, CLASS_MAP_TESTING_INT);
+                // Prepend the directory (adjust PATH_SEPARATOR as needed)
+                string fullPath = "datasets" + string(PATH_SEPARATOR) + testingDataFileName;
+
+                testData = dataSetup(fullPath, CLASS_MAP_TESTING, CLASS_MAP_TESTING_INT);
                 // Normalize and reorder testing data as needed.
-                // normalizeTestSet(testData, minValues, maxValues);
-                // testData = reorderTestingDataset(testData, CLASS_MAP, CLASS_MAP_TESTING);
+                normalizeTestSet(testData, minValues, maxValues);
+                testData = reorderTestingDataset(testData, CLASS_MAP, CLASS_MAP_TESTING);
                 waitForEnter();
                 break;
             }
