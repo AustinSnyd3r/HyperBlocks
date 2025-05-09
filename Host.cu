@@ -17,7 +17,7 @@
 #include <map>
 #include <cmath>
 #include <filesystem>
-
+#include "./data_utilities/StatStructs.h"
 #include "./cuda_util/CudaUtil.h"
 #include "./hyperblock_generation/MergerHyperBlock.cuh"
 #include "./hyperblock/HyperBlock.h"
@@ -47,9 +47,16 @@ map<string, int> CLASS_MAP_TESTING;
 map<int, string> CLASS_MAP_INT;
 map<int, string> CLASS_MAP_TESTING_INT;
 
+using namespace std;
 
-void evaluateOneToOneHyperBlocks(const std::vector<std::vector<HyperBlock>>& oneToOneHBs,const std::vector<std::vector<std::vector<float>>>& testSet,const std::vector<std::pair<int, int>>& classPairs, int numClasses);
-
+void evaluateOneToOneHyperBlocks(
+    const std::vector<std::vector<HyperBlock>>& oneToOneHBs,
+    const std::vector<std::vector<std::vector<float>>>& testSet,
+    const std::vector<std::pair<int, int>>& classPairs,
+    int numClasses,
+    std::map<std::pair<int, int>, PointSummary>& pointSummaries,
+    vector<int> order
+);
 
 /**
  * For each class of data that we have:
@@ -297,7 +304,7 @@ float testAccuracyOfHyperBlocks(
     //TODO: PUT IN THE KNN HERE,
     //TODO  add to PointSummary with info from KNN fallback pls
 
-    
+    printPointSummariesToCSV(pointSummaries, "summary.csv");
   /*
     // Find the closest actual cases to the edge of each block.
     //for(HyperBlock& hb: hyperBlocks){
@@ -380,7 +387,7 @@ std::vector<int> computeLDAOrdering(const vector<vector<vector<float>>>& trainin
 }
 
 
-vector<float> runKFold(vector<vector<vector<float>>> &dataset, std::vector<std::pair<int,int>>& classPairs, bool onToMany = true, bool takeUserInput = false, int removalCount = 3, int nearestNeighborK = 5, float similarityThreshold = 0.6f, bool hidePrinting = false) {
+vector<float> runKFold(vector<vector<vector<float>>> &dataset, std::vector<std::pair<int,int>>& classPairs, bool oneToMany = true, bool takeUserInput = false, int removalCount = 3, int nearestNeighborK = 5, float similarityThreshold = 0.6f, bool hidePrinting = false) {
 
     if (dataset.empty()) {
         cout << "Please enter a training dataset before using K Fold validation" << endl;
@@ -450,56 +457,53 @@ vector<float> runKFold(vector<vector<vector<float>>> &dataset, std::vector<std::
         vector<vector<int>> bestVectorsIndexes = vector<vector<int> >(NUM_CLASSES, vector<int>(FIELD_LENGTH, 0));
         vector<int> eachClassBestVectorIndex = vector<int>(NUM_CLASSES);
 
-        computeLDAOrdering(trainingData, bestVectors, bestVectorsIndexes, eachClassBestVectorIndex);
+        vector<int> ldaOrder = computeLDAOrdering(trainingData, bestVectors, bestVectorsIndexes, eachClassBestVectorIndex);
 
 
         cout << "----------------------------FOLD " << (i + 1) << " RESULTS----------------------------------" << endl;
+
+        map<pair<int, int>, PointSummary> pointSummaries;
 
         if (oneToMany) {
             // ------------------------------------------
             // GENERATING BLOCKS BUSINESS AS USUAL
             vector<HyperBlock> hyperBlocks;
 
+            // make our blocks
             IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
-            //cout << "HYPERBLOCK GENERATION FINISHED!" << endl;
-            //cout << "GENERATED WITH " << hyperBlocks.size() << " BLOCKS" << endl;
+
+            // simplify them, with the simplification count we have specifed as a parameter. usually 0, but playing with this value can get us better results because we are removing more blocks
+            Simplifications::REMOVAL_COUNT = removalCount;
+
+            // the vector of int is the total times it simplified, then the clause count.
             vector<int> result = Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
 
+            // clause count computed here because sometimes we don't simplify
+            int totalPoints = 0;
+            for (const auto &c : trainingData)
+                totalPoints += c.size();
 
-        // make our blocks
-        IntervalHyperBlock::generateHBs(trainingData, hyperBlocks, eachClassBestVectorIndex, FIELD_LENGTH, COMMAND_LINE_ARGS_CLASS);
-
-        // simplify them, with the simplification count we have specifed as a parameter. usually 0, but playing with this value can get us better results because we are removing more blocks
-        Simplifications::REMOVAL_COUNT = removalCount;
-
-        // the vector of int is the total times it simplified, then the clause count.
-        vector<int> result = Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
-
-        // clause count computed here because sometimes we don't simplify
-        int totalPoints = 0;
-        for (const auto &c : trainingData)
-            totalPoints += c.size();
-
-        int clauseCount = 0;
-        for (const auto &hb : hyperBlocks) {
-            for (int a = 0; a < FIELD_LENGTH; a++) {
-                if (hb.minimums[a][0] != 0.0f || hb.maximums[a][0] != 1.0f)
-                    clauseCount++;
+            int clauseCount = 0;
+            for (const auto &hb : hyperBlocks) {
+                for (int a = 0; a < FIELD_LENGTH; a++) {
+                    if (hb.minimums[a][0] != 0.0f || hb.maximums[a][0] != 1.0f)
+                        clauseCount++;
                 }
             }
-
+            pointSummaries.clear();
+            acc += testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData, ldaOrder, pointSummaries, nearestNeighborK, similarityThreshold);
+            blockCount += hyperBlocks.size();
+            cCount += clauseCount;
         } // end of one train/test loop
         else {
+
             vector<vector<HyperBlock>> oneToOneBlocks = oneToOneHyper(trainingData, eachClassBestVectorIndex, classPairs);
-            evaluateOneToOneHyperBlocks(oneToOneBlocks, testData, classPairs, NUM_CLASSES);
+            evaluateOneToOneHyperBlocks(oneToOneBlocks, testData, classPairs, NUM_CLASSES, pointSummaries, ldaOrder);
         }
 
     }
 
-        acc += testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData, nearestNeighborK, similarityThreshold);
-        blockCount += hyperBlocks.size();
-        cCount += clauseCount;
-    } // end of one train/test loop
+     // end of one train/test loop
 
     float avgAcc = float (acc) / float(k);
     float blockAvg = float(blockCount) / float(k);
@@ -514,6 +518,7 @@ vector<float> runKFold(vector<vector<vector<float>>> &dataset, std::vector<std::
     return {avgAcc, blockAvg, clauseAvg};
 }
 
+/*
 // function which is going to test brute force with different removing useless blocks thresholds and k values for KNN to determine best accuracy we can find across k fold validation with 10 folds.
 void findBestParameters(vector<vector<vector<float>>> &dataset, int maxRemovalCount, int maxK) {
 
@@ -540,7 +545,7 @@ void findBestParameters(vector<vector<vector<float>>> &dataset, int maxRemovalCo
     cout << "Best accuracy: " << bestResults[0] << "\nBlock Count Average w/best results: " << bestResults[1] << "\nClause Count Average: " << bestResults[2] << endl;
     cout << "BEST PARAMETERS: REMOVAL COUNT: " << bestParameters[0] << " K: " << bestParameters[1] << " Threshold: " << bestParameters[2] << endl;
 }
-
+*/
 
 float evaluateOneToSomeHBs(const vector<vector<HyperBlock>>& oneToSomeBlocks, const vector<vector<vector<float>>>& testData) {
     vector<vector<long>> confusionMatrix(NUM_CLASSES, vector<long>(NUM_CLASSES, 0));
@@ -686,7 +691,9 @@ void evaluateOneToOneHyperBlocks(
     const std::vector<std::vector<HyperBlock>>& oneToOneHBs,
     const std::vector<std::vector<std::vector<float>>>& testSet,
     const std::vector<std::pair<int, int>>& classPairs,
-    int numClasses
+    int numClasses,
+    std::map<std::pair<int, int>, PointSummary>& pointSummaries,
+    std::vector<int> order
 ) {
     int totalPoints = 0;
     int correctPoints = 0;
@@ -694,49 +701,199 @@ void evaluateOneToOneHyperBlocks(
     std::vector<std::vector<int>> confusion(numClasses, std::vector<int>(numClasses, 0));
     std::vector<int> correctPerClass(numClasses, 0);
     std::vector<int> totalPerClass(numClasses, 0);
+    std::vector<float> perClassPrecisions = {0.7826, 0.9748,
+                                            0.7922, 0.9345,
+                                            0.8594, 0.9991,
+                                            0.7745, 0.8006,
+                                            0.8014, 0.7394,
+                                            0.7846, 0.8946,
+                                            0.7774, 0.9929,
+                                            0.7728, 0.9553,
+                                            0.8591, 0.7561,
+                                            0.9429, 0.8783,
+                                            0.9244, 0.9958,
+                                            0.9591, 0.8162,
+                                            0.9866, 0.8730,
+                                            0.9683, 0.8603,
+                                            0.9522, 0.9757,
+                                            0.9510, 0.9243,
+                                            0.9628, 0.6427,
+                                            0.8120, 0.9993,
+                                            0.9271, 0.7898,
+                                            0.8188, 0.8116,
+                                            0.8215, 0.9023,
+                                            0.7937, 0.9669,
+                                            0.9251, 0.9671,
+                                            0.8918, 0.8529,
+                                            0.9985, 0.8021,
+                                            0.9992, 0.8574,
+                                            0.9997, 0.8962,
+                                            0.9978, 0.9720,
+                                            0.9998, 0.9614,
+                                            0.9999, 0.8087,
+                                            0.7962, 0.7096,
+                                            0.8874, 0.9078,
+                                            0.8082, 0.9358,
+                                            0.9084, 0.9812,
+                                            0.7984, 0.9178,
+                                            0.8514, 0.8662,
+                                            0.9151, 0.9889,
+                                            0.7131, 0.9386,
+                                            0.7423, 0.7125,
+                                            0.8979, 0.9769,
+                                            0.8735, 0.9712,
+                                            0.9300, 0.6983,
+                                            0.9547, 0.9278,
+                                            0.9839, 0.7333,
+                                            0.9473, 0.9060};
 
 
     for (int actualClass = 0; actualClass < numClasses; ++actualClass) {
-        for (const auto& point : testSet[actualClass]) {
-            std::vector<int> votes(numClasses, 0);
+            for (const auto& point : testSet[actualClass]) {
+                std::vector<int> votes(numClasses, 0);
 
-            // Run all pairwise comparisons
-            for (int i = 0; i < numClasses; ++i) {
-                for (int j = i + 1; j < numClasses; ++j) {
-                    // Find the correct index using classPairs
-                    int findPairIndex = -1;
-                    for (int idx = 0; idx < classPairs.size(); ++idx) {
-                        if ((classPairs[idx].first == i && classPairs[idx].second == j) ||
-                            (classPairs[idx].first == j && classPairs[idx].second == i)) {
-                            findPairIndex = idx;
-                            break;
+                // Run all pairwise comparisons
+                for (int i = 0; i < numClasses; ++i) {
+                    for (int j = i + 1; j < numClasses; ++j) {
+                        // Find the correct index using classPairs
+                        int findPairIndex = -1;
+                        for (int idx = 0; idx < classPairs.size(); ++idx) {
+                            if ((classPairs[idx].first == i && classPairs[idx].second == j) ||
+                                (classPairs[idx].first == j && classPairs[idx].second == i)) {
+                                findPairIndex = idx;
+                                break;
+                                }
+                        }
+                        if (findPairIndex == -1) {
+                            std::cerr << "Error: could not find block set for classes " << i << " and " << j << "\n";
+                            continue;
+                        }
+
+                        const auto& pairHBs = oneToOneHBs[findPairIndex];
+
+                        bool inClassI = false, inClassJ = false;
+
+                        for (const auto& block : pairHBs) {
+                            if (block.classNum == i && block.inside_HB(point.size(), point.data())) {
+                                inClassI = true;
                             }
-                    }
-                    if (findPairIndex == -1) {
-                        std::cerr << "Error: could not find block set for classes " << i << " and " << j << "\n";
-                        continue;
-                    }
+                            if (block.classNum == j && block.inside_HB(point.size(), point.data())) {
+                                inClassJ = true;
+                            }
+                        }
 
-                    const auto& pairHBs = oneToOneHBs[findPairIndex];
-
-
-                    for (const auto& block : pairHBs) {
-                        if (block.classNum == i && block.inside_HB(point.size(), point.data())) {
+                        if (inClassI && !inClassJ) votes[i]++;
+                        else if (!inClassI && inClassJ) votes[j]++;
+                        else if (inClassI && inClassJ) {
                             votes[i]++;
+                            votes[j]++;
                         }
-                        if (block.classNum == j && block.inside_HB(point.size(), point.data())) {
-                            votes[j++];
-                        }
+                    }
+                }
+
+                // Majority vote
+                int predictedClass = std::distance(votes.begin(), std::max_element(votes.begin(), votes.end()));
+                if (votes[predictedClass] == 0) {
+                    // No vote: optionally handle as unclassified
+                    cout << "Unhandled vote:" << endl;
+
+
+
+                    continue;
+                }
+
+                confusion[actualClass][predictedClass]++;
+                totalPerClass[actualClass]++;
+                if (predictedClass == actualClass) {
+                    correctPerClass[actualClass]++;
+                    correctPoints++;
+                }
+                totalPoints++;
+            }
+        }
+
+    // Output
+    std::cout << "\nConfusion Matrix:\n";
+    for (int i = 0; i < numClasses; ++i) {
+        for (int j = 0; j < numClasses; ++j) {
+            std::cout << confusion[i][j] << "\t";
+        }
+        std::cout << "\n";
+    }
+
+    std::cout << "\nPer-Class Accuracy:\n";
+    for (int i = 0; i < numClasses; ++i) {
+        float acc = totalPerClass[i] ? static_cast<float>(correctPerClass[i]) / totalPerClass[i] : 0.0f;
+        std::cout << "Class " << CLASS_MAP_INT[i] << ": " << acc * 100.0f << "%\n";
+    }
+
+    std::cout << "\nOverall Accuracy: " << (static_cast<float>(correctPoints) / totalPoints) * 100.0f << "%\n";
+}
+
+
+void evaluateOneToOneHyperBlocksV2(
+    const std::vector<std::vector<HyperBlock>>& oneToOneHBs,
+    const std::vector<std::vector<std::vector<float>>>& testSet,
+    const std::vector<std::pair<int, int>>& classPairs,
+    int numClasses,
+    std::map<std::pair<int, int>, PointSummary>& pointSummaries,
+    std::vector<int> order
+) {
+    // Fixed order
+    order = {42, 38, 12, 34, 31, 40, 44, 43, 17, 1, 16, 6, 8, 36, 11, 2, 9, 29, 41, 3, 21, 35, 10, 27, 18, 23, 32, 26, 15, 37, 24, 28, 33, 0, 14, 13, 7, 19, 25, 30, 39, 5, 22, 4, 20};
+
+    std::vector<float> perClassPrecisions = {0.7826, 0.9748, 0.7922, 0.9345, 0.8594, 0.9991, 0.7745, 0.8006, 0.8014, 0.7394, 0.7846, 0.8946, 0.7774, 0.9929, 0.7728, 0.9553, 0.8591, 0.7561, 0.9429, 0.8783, 0.9244, 0.9958, 0.9591, 0.8162, 0.9866, 0.8730, 0.9683, 0.8603, 0.9522, 0.9757, 0.9510, 0.9243, 0.9628, 0.6427, 0.8120, 0.9993, 0.9271, 0.7898, 0.8188, 0.8116, 0.8215, 0.9023, 0.7937, 0.9669, 0.9251, 0.9671, 0.8918, 0.8529, 0.9985, 0.8021, 0.9992, 0.8574, 0.9997, 0.8962, 0.9978, 0.9720, 0.9998, 0.9614, 0.9999, 0.8087, 0.7962, 0.7096, 0.8874, 0.9078, 0.8082, 0.9358, 0.9084, 0.9812, 0.7984, 0.9178, 0.8514, 0.8662, 0.9151, 0.9889, 0.7131, 0.9386, 0.7423, 0.7125, 0.8979, 0.9769, 0.8735, 0.9712, 0.9300, 0.6983, 0.9547, 0.9278, 0.9839, 0.7333, 0.9473, 0.9060};
+    int realCount = 0;
+    for(const auto& a: testSet ) {
+        realCount += a.size();
+    }
+
+    std::vector<std::vector<int>> confusion(numClasses, std::vector<int>(numClasses, 0));
+    std::vector<int> correctPerClass(numClasses, 0);
+    std::vector<int> totalPerClass(numClasses, 0);
+    int totalPoints = 0, correctPoints = 0;
+
+    for (int actualClass = 0; actualClass < numClasses; ++actualClass) {
+        for (size_t pointIdx = 0; pointIdx < testSet[actualClass].size(); ++pointIdx) {
+            const std::vector<float>& point = testSet[actualClass][pointIdx];
+            std::vector<float> classVotes(numClasses, 0.0f);
+
+            for (size_t orderIdx = 0; orderIdx < order.size(); ++orderIdx) {
+                int pairIdx = order[orderIdx];
+                if (pairIdx < 0 || pairIdx >= static_cast<int>(oneToOneHBs.size())) continue;
+
+                const std::vector<HyperBlock>& pairHBs = oneToOneHBs[pairIdx];
+                std::pair<int, int> classifier = classPairs[pairIdx];
+
+                for (size_t hbIdx = 0; hbIdx < pairHBs.size(); ++hbIdx) {
+                    const HyperBlock& block = pairHBs[hbIdx];
+                    if (block.inside_HB(point.size(), point.data())) {
+                        // Use per-class precision score based on the classNum of the block
+                        float weight = (block.classNum == classifier.first)? perClassPrecisions[pairIdx * 2]: perClassPrecisions[pairIdx * 2 + 1];                        classVotes[block.classNum] += weight;
+
+                        PointSummary& summary = pointSummaries[std::make_pair(actualClass, static_cast<int>(pointIdx))];
+                        summary.classIdx = actualClass;
+                        summary.pointIdx = static_cast<int>(pointIdx);
+
+                        BlockInfo info;
+                        info.blockClass = block.classNum;
+                        info.blockIdx = static_cast<int>(hbIdx);
+                        info.blockSize = block.size;
+                        info.blockDensity = 0;
+                        info.classifierPair = classifier;
+                        info.hasClassifierPair = true;
+
+                        summary.blockHits.push_back(info);
+                        break;
                     }
                 }
             }
 
-            // Majority vote
-            int predictedClass = std::distance(votes.begin(), std::max_element(votes.begin(), votes.end()));
-            if (votes[predictedClass] == 0) {
-                // No vote: optionally handle as unclassified
-                continue;
-            }
+            int predictedClass = std::distance(classVotes.begin(), std::max_element(classVotes.begin(), classVotes.end()));
+            if (classVotes[predictedClass] == 0) continue;
+
+            PointSummary& summary = pointSummaries[std::make_pair(actualClass, static_cast<int>(pointIdx))];
+            summary.predictedIdx = predictedClass;
 
             confusion[actualClass][predictedClass]++;
             totalPerClass[actualClass]++;
@@ -748,7 +905,6 @@ void evaluateOneToOneHyperBlocks(
         }
     }
 
-    // Output
     std::cout << "\nConfusion Matrix:\n";
     for (int i = 0; i < numClasses; ++i) {
         for (int j = 0; j < numClasses; ++j) {
@@ -763,7 +919,266 @@ void evaluateOneToOneHyperBlocks(
         std::cout << "Class " << i << ": " << acc * 100.0f << "%\n";
     }
 
+    for (int i = 0; i < numClasses; ++i) {
+        float acc = totalPerClass[i] ? static_cast<float>(correctPerClass[i]) / totalPerClass[i] : 0.0f;
+        std::cout << "Real Class " << CLASS_MAP_INT[i] << ": " << acc * 100.0f << "%\n";
+    }
+
+    std::cout << totalPoints << "/ " << realCount << endl;
+
     std::cout << "\nOverall Accuracy: " << (static_cast<float>(correctPoints) / totalPoints) * 100.0f << "%\n";
+}
+
+
+
+
+void evaluateOneToOneHyperBlocksOld(
+    const std::vector<std::vector<HyperBlock>>& oneToOneHBs,
+    const std::vector<std::vector<std::vector<float>>>& testSet,
+    const std::vector<std::pair<int, int>>& classPairs,
+    const int numClasses,
+    std::map<std::pair<int, int>, PointSummary>& pointSummaries,
+    std::vector<int> order
+) {
+    // Essentially we want to go through all the classifiers, check which one is "winning"
+    // Flattened version for easy copy-paste
+
+    auto confusionSimple = new int[10][10]();
+    auto confusionProb  = new int[10][10]();
+    auto confusionHybrid = new int[10][10]();
+
+    std::vector<std::tuple<int, int, int, std::vector<float>>> allClassProbabilities = {
+    std::make_tuple(0, 1, 0, std::vector<float>{0.962723f, 0.037277f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(0, 1, 1, std::vector<float>{0.003641f, 0.996359f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(0, 2, 0, std::vector<float>{0.984615f, 0.000000f, 0.015385f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(0, 2, 2, std::vector<float>{0.010230f, 0.000000f, 0.989770f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(0, 3, 0, std::vector<float>{1.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(0, 3, 3, std::vector<float>{0.005862f, 0.000000f, 0.000000f, 0.994138f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(0, 4, 0, std::vector<float>{0.991039f, 0.000000f, 0.000000f, 0.000000f, 0.008961f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(0, 4, 4, std::vector<float>{0.010736f, 0.000000f, 0.000000f, 0.000000f, 0.989264f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(0, 5, 0, std::vector<float>{0.974164f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.025836f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(0, 5, 5, std::vector<float>{0.002506f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.997494f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(0, 6, 0, std::vector<float>{0.958678f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.041322f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(0, 6, 6, std::vector<float>{0.058321f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.941679f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(0, 7, 0, std::vector<float>{0.985124f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.014876f, 0.000000f, 0.000000f}),
+    std::make_tuple(0, 7, 7, std::vector<float>{0.021795f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.978205f, 0.000000f, 0.000000f}),
+    std::make_tuple(0, 8, 0, std::vector<float>{0.990228f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.009772f, 0.000000f}),
+    std::make_tuple(0, 8, 8, std::vector<float>{0.001261f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.998739f, 0.000000f}),
+    std::make_tuple(0, 9, 0, std::vector<float>{0.957169f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.042831f}),
+    std::make_tuple(0, 9, 9, std::vector<float>{0.023988f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.976012f}),
+    std::make_tuple(1, 2, 1, std::vector<float>{0.000000f, 1.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(1, 2, 2, std::vector<float>{0.000000f, 0.004890f, 0.995110f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(1, 3, 1, std::vector<float>{0.000000f, 1.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(1, 3, 3, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 1.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(1, 4, 1, std::vector<float>{0.000000f, 0.998879f, 0.000000f, 0.000000f, 0.001121f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(1, 4, 4, std::vector<float>{0.000000f, 0.007032f, 0.000000f, 0.000000f, 0.992968f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(1, 5, 1, std::vector<float>{0.000000f, 0.989679f, 0.000000f, 0.000000f, 0.000000f, 0.010321f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(1, 5, 5, std::vector<float>{0.000000f, 0.012953f, 0.000000f, 0.000000f, 0.000000f, 0.987047f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(1, 6, 1, std::vector<float>{0.000000f, 0.998891f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.001109f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(1, 6, 6, std::vector<float>{0.000000f, 0.010526f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.989474f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(1, 7, 1, std::vector<float>{0.000000f, 0.994305f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.005695f, 0.000000f, 0.000000f}),
+    std::make_tuple(1, 7, 7, std::vector<float>{0.000000f, 0.012315f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.987685f, 0.000000f, 0.000000f}),
+    std::make_tuple(1, 8, 1, std::vector<float>{0.000000f, 0.996721f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003279f, 0.000000f}),
+    std::make_tuple(1, 8, 8, std::vector<float>{0.000000f, 0.001244f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.998756f, 0.000000f}),
+    std::make_tuple(1, 9, 1, std::vector<float>{0.000000f, 0.997807f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.002193f}),
+    std::make_tuple(1, 9, 9, std::vector<float>{0.000000f, 0.009247f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.990753f}),
+    std::make_tuple(2, 3, 2, std::vector<float>{0.000000f, 0.000000f, 1.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(2, 3, 3, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 1.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(2, 4, 2, std::vector<float>{0.000000f, 0.000000f, 0.977528f, 0.000000f, 0.022472f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(2, 4, 4, std::vector<float>{0.000000f, 0.000000f, 0.125512f, 0.000000f, 0.874488f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(2, 5, 2, std::vector<float>{0.000000f, 0.000000f, 0.984925f, 0.000000f, 0.000000f, 0.015075f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(2, 5, 5, std::vector<float>{0.000000f, 0.000000f, 0.002389f, 0.000000f, 0.000000f, 0.997611f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(2, 6, 2, std::vector<float>{0.000000f, 0.000000f, 0.991217f, 0.000000f, 0.000000f, 0.000000f, 0.008783f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(2, 6, 6, std::vector<float>{0.000000f, 0.000000f, 0.002611f, 0.000000f, 0.000000f, 0.000000f, 0.997389f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(2, 7, 2, std::vector<float>{0.000000f, 0.000000f, 0.995080f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.004920f, 0.000000f, 0.000000f}),
+    std::make_tuple(2, 7, 7, std::vector<float>{0.000000f, 0.000000f, 0.003708f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.996292f, 0.000000f, 0.000000f}),
+    std::make_tuple(2, 8, 2, std::vector<float>{0.000000f, 0.000000f, 1.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(2, 8, 8, std::vector<float>{0.000000f, 0.000000f, 0.040195f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.959805f, 0.000000f}),
+    std::make_tuple(2, 9, 2, std::vector<float>{0.000000f, 0.000000f, 0.962963f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.037037f}),
+    std::make_tuple(2, 9, 9, std::vector<float>{0.000000f, 0.000000f, 0.013062f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.986938f}),
+    std::make_tuple(3, 4, 3, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.998828f, 0.001172f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(3, 4, 4, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.002861f, 0.997139f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(3, 5, 3, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.906482f, 0.000000f, 0.093518f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(3, 5, 5, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 1.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(3, 6, 3, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.981481f, 0.000000f, 0.000000f, 0.018519f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(3, 6, 6, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 1.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(3, 7, 3, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.995327f, 0.000000f, 0.000000f, 0.000000f, 0.004673f, 0.000000f, 0.000000f}),
+    std::make_tuple(3, 7, 7, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 1.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(3, 8, 3, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.995327f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.004673f, 0.000000f}),
+    std::make_tuple(3, 8, 8, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 1.000000f, 0.000000f}),
+    std::make_tuple(3, 9, 3, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.878023f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.121977f}),
+    std::make_tuple(3, 9, 9, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.002642f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.997358f}),
+    std::make_tuple(4, 5, 4, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.998565f, 0.001435f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(4, 5, 5, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.001126f, 0.998874f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(4, 6, 4, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.987860f, 0.000000f, 0.012140f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(4, 6, 6, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.019006f, 0.000000f, 0.980994f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(4, 7, 4, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 1.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(4, 7, 7, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 1.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(4, 8, 4, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.972006f, 0.000000f, 0.000000f, 0.000000f, 0.027994f, 0.000000f}),
+    std::make_tuple(4, 8, 8, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.096977f, 0.000000f, 0.000000f, 0.000000f, 0.903023f, 0.000000f}),
+    std::make_tuple(4, 9, 4, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.938375f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.061625f}),
+    std::make_tuple(4, 9, 9, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.021930f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.978070f}),
+    std::make_tuple(5, 6, 5, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.992806f, 0.007194f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(5, 6, 6, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.041026f, 0.958974f, 0.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(5, 7, 5, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.987968f, 0.000000f, 0.012032f, 0.000000f, 0.000000f}),
+    std::make_tuple(5, 7, 7, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.042781f, 0.000000f, 0.957219f, 0.000000f, 0.000000f}),
+    std::make_tuple(5, 8, 5, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.995402f, 0.000000f, 0.000000f, 0.004598f, 0.000000f}),
+    std::make_tuple(5, 8, 8, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.010270f, 0.000000f, 0.000000f, 0.989730f, 0.000000f}),
+    std::make_tuple(5, 9, 5, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.982919f, 0.000000f, 0.000000f, 0.000000f, 0.017081f}),
+    std::make_tuple(5, 9, 9, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.029957f, 0.000000f, 0.000000f, 0.000000f, 0.970043f}),
+    std::make_tuple(6, 7, 6, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.992053f, 0.007947f, 0.000000f, 0.000000f}),
+    std::make_tuple(6, 7, 7, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.002558f, 0.997442f, 0.000000f, 0.000000f}),
+    std::make_tuple(6, 8, 6, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.985353f, 0.000000f, 0.014647f, 0.000000f}),
+    std::make_tuple(6, 8, 8, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.009472f, 0.000000f, 0.990528f, 0.000000f}),
+    std::make_tuple(6, 9, 6, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.972857f, 0.000000f, 0.000000f, 0.027143f}),
+    std::make_tuple(6, 9, 9, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.036269f, 0.000000f, 0.000000f, 0.963731f}),
+    std::make_tuple(7, 8, 7, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 1.000000f, 0.000000f, 0.000000f}),
+    std::make_tuple(7, 8, 8, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.001238f, 0.998762f, 0.000000f}),
+    std::make_tuple(7, 9, 7, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.994949f, 0.000000f, 0.005051f}),
+    std::make_tuple(7, 9, 9, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.006784f, 0.000000f, 0.993216f}),
+    std::make_tuple(8, 9, 8, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.967621f, 0.032379f}),
+    std::make_tuple(8, 9, 9, std::vector<float>{0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.005961f, 0.994039f}),
+};
+
+    std::vector<float> perClassPrecisions = {0.7826, 0.9748, 0.7922, 0.9345, 0.8594, 0.9991, 0.7745, 0.8006, 0.8014, 0.7394, 0.7846, 0.8946, 0.7774, 0.9929, 0.7728, 0.9553, 0.8591, 0.7561, 0.9429, 0.8783, 0.9244, 0.9958, 0.9591, 0.8162, 0.9866, 0.8730, 0.9683, 0.8603, 0.9522, 0.9757, 0.9510, 0.9243, 0.9628, 0.6427, 0.8120, 0.9993, 0.9271, 0.7898, 0.8188, 0.8116, 0.8215, 0.9023, 0.7937, 0.9669, 0.9251, 0.9671, 0.8918, 0.8529, 0.9985, 0.8021, 0.9992, 0.8574, 0.9997, 0.8962, 0.9978, 0.9720, 0.9998, 0.9614, 0.9999, 0.8087, 0.7962, 0.7096, 0.8874, 0.9078, 0.8082, 0.9358, 0.9084, 0.9812, 0.7984, 0.9178, 0.8514, 0.8662, 0.9151, 0.9889, 0.7131, 0.9386, 0.7423, 0.7125, 0.8979, 0.9769, 0.8735, 0.9712, 0.9300, 0.6983, 0.9547, 0.9278, 0.9839, 0.7333, 0.9473, 0.9060};
+
+    // Class loop
+    for(int classIdx = 0; classIdx < numClasses; ++classIdx) {
+        // point Loop
+        for (size_t pointIdx = 0; pointIdx < testSet[classIdx].size(); ++pointIdx) {
+            const auto& point = testSet[classIdx][pointIdx];
+            vector<float> globalVotes(numClasses, 0.0f);
+            vector<int> simpleVotes(numClasses, 0);
+
+            for(int i = 0; i < oneToOneHBs.size(); i++) {
+                // Grab the binary classifier of these two
+                const auto& oneToOneSet = oneToOneHBs[i];
+                const int cls1 = classPairs[i].first;
+                const int cls2 = classPairs[i].second;
+
+                // Get the probability vote vector entry
+                auto cls1VoteProbabilities = std::get<3>(allClassProbabilities[i * 2]);
+                auto cls2VoteProbabilities = std::get<3>(allClassProbabilities[i * 2 + 1]);
+
+                vector<float> cOneVotes(numClasses, 0.0f);
+                vector<float> cTwoVotes(numClasses, 0.0f);
+
+                /*Note: we could either use these as global votes, or as a voting for each classifier.*/
+                int cls2Count = 0;
+                int cls1Count = 0;
+
+                // Go through the pairs blocks
+                for(const auto& hb : oneToOneSet) {
+                    if (hb.inside_HB(point.size(), point.data())) {
+                        if (hb.classNum == cls1) {
+                            cls1Count++;
+                        } else if (hb.classNum == cls2) {
+                            cls2Count++;
+                        }
+                    }
+                }
+
+                if(cls1Count > cls2Count && cls2Count > 0) {
+                    simpleVotes[cls1]++;
+                }
+                else if (cls2Count > cls1Count && cls1Count > 0) {
+                    simpleVotes[cls2]++;
+                }
+
+                float tempc1 = cls1Count * pow(perClassPrecisions[i*2], 2);
+                float tempc2 = cls2Count * pow(perClassPrecisions[i*2 + 1], 2);
+
+                if(tempc1 > tempc2) {
+                    globalVotes[cls1]++;
+                }
+                else {
+                    globalVotes[cls2]++;
+                }
+
+            }
+
+            // Check what the result would be if we used simple voting?
+            // add to a confusion matrix
+            int simplePredicted = std::distance(simpleVotes.begin(), std::max_element(simpleVotes.begin(), simpleVotes.end()));
+
+            // Check what the result would be if we use probability voting?
+            // add to a confusion matrix
+            float best = 0.0f;
+            int bestClass = -1;
+            for(int v = 0; v < numClasses; ++v) {
+                if(globalVotes[v] > best) {
+                    bestClass = v;
+                    best = globalVotes[v];
+                }
+            }
+
+
+
+            // Check if we somehow used voth of them, maybe just to break ties?
+            // add to a confusion matrix
+            // === Hybrid Voting ===
+            int hybridPredicted = simplePredicted;
+            // If tie or low confidence in simple vote, defer to probability
+            int simpleMax = *std::max_element(simpleVotes.begin(), simpleVotes.end());
+            int simpleCount = std::count(simpleVotes.begin(), simpleVotes.end(), simpleMax);
+            if (simpleCount > 1) {
+                hybridPredicted = bestClass;  // break tie
+            }
+
+            confusionSimple[classIdx][simplePredicted]++;
+            if(bestClass == -1) {
+                cout << "class error" << endl;
+            }
+            confusionProb[classIdx][bestClass]++;
+            confusionHybrid[classIdx][hybridPredicted]++;
+        }
+    }
+
+    auto computeMetrics = [](int matrix[10][10], const std::string& label) {
+        std::cout << "\n=== " << label << " Confusion Matrix ===\n";
+        for (int i = 0; i < 10; ++i) {
+            for (int j = 0; j < 10; ++j)
+                std::cout << matrix[i][j] << " ";
+            std::cout << "\n";
+        }
+
+        std::cout << "\n=== Metrics by Class ===\n";
+        float totalCorrect = 0;
+        float totalSamples = 0;
+
+        for (int i = 0; i < 10; ++i) {
+            int TP = matrix[i][i];
+            int FN = 0, FP = 0;
+            for (int j = 0; j < 10; ++j) {
+                if (j != i) {
+                    FN += matrix[i][j];
+                    FP += matrix[j][i];
+                }
+            }
+            int total = 0;
+            for (int j = 0; j < 10; ++j) total += matrix[i][j];
+            totalCorrect += TP;
+            totalSamples += total;
+
+            float precision = TP + FP > 0 ? TP / float(TP + FP) : 0;
+            float recall = TP + FN > 0 ? TP / float(TP + FN) : 0;
+            float f1 = precision + recall > 0 ? 2 * precision * recall / (precision + recall) : 0;
+
+            std::cout << "Class " << i << " real: " << CLASS_MAP_INT[i] << " | "
+                      << "Precision: " << std::fixed << std::setprecision(4) << precision << "  "
+                      << "Recall: " << recall << "  "
+                      << "F1: " << f1 << "\n";
+        }
+
+        float overallAccuracy = totalCorrect / totalSamples;
+        std::cout << "\nOverall Accuracy (" << label << "): " << overallAccuracy << "\n";
+    };
+
+    computeMetrics(confusionSimple, "Simple");
+    computeMetrics(confusionProb, "Prob");
+    computeMetrics(confusionHybrid, "Hybrid");
+    // Print the overall accuracy, and by class
+
 }
 
 /**
@@ -850,6 +1265,19 @@ vector<int> findOneToSomeOrder(vector<vector<vector<float>>>& validationData, ve
     return blockOrder;
 }
 
+/**
+ *  NEW ONE TO ONE EVALUATION. ATTEMPT TO USE HISTORICAL CONFUSION, PRECISION, RECALL
+ *
+ *  Each classifier will have instead a vote based on the probability of the winning classifier.
+ *  For example 1:3, if 1 wins (maybe weight them first on precision and # blocks relative to total num blocks)
+ *  then we would assign vote based on
+ *  the classifications of class 1. For example {.90 for class 1, .05 for class 2, .04 for class 5, .01 for class 9}
+ *  We would keep track of a vector<float>(numclasses) instead of a single int vote.
+ *
+ */
+
+
+
 
 // -------------------------------------------------------------------------
 // Interactive mode: run when argc < 2
@@ -883,6 +1311,9 @@ void runInteractive() {
 
     vector<vector<HyperBlock>> oneToRestBlocks;
 
+
+    map<pair<int, int>, PointSummary> pointSummaries;
+
     int normChoice;
 
     bool running = true;
@@ -906,6 +1337,13 @@ void runInteractive() {
                 CLASS_MAP.clear();
                 CLASS_MAP_INT.clear();
                 trainingData = DataUtil::dataSetup(fullPath.c_str(), CLASS_MAP, CLASS_MAP_INT);
+
+                for(int i = 0; i < trainingData.size(); ++i) {
+                    const auto& cls = trainingData[i];
+                    cout << "Number points in class idx " << i << ": " << cls.size() << endl;
+                }
+                for(int i = 0; i < NUM_CLASSES; i++)
+                    cout << "Training Class (REAL LABEL): " << CLASS_MAP_INT[i] << endl;
 
                 cout << "Choose normalization method:\n";
                 cout << "  1. Min-Max normalize using dataset bounds\n";
@@ -1028,18 +1466,17 @@ void runInteractive() {
             }
             case 8: { // TEST HYPERBLOCKS ON DATASET
                 std::cout << "Testing hyperblocks on testing dataset" << std::endl;
-                testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData, order);
-
+                testAccuracyOfHyperBlocks(hyperBlocks, testData, trainingData, order, pointSummaries);
                 PrintingUtil::waitForEnter();
                 break;
             }
             case 9: {
-                evaluateOneToOneHyperBlocks(oneToOneBlocks, testData, classPairsOut, NUM_CLASSES);
+                evaluateOneToOneHyperBlocks(oneToOneBlocks, testData, classPairsOut, NUM_CLASSES, pointSummaries, order);
                 PrintingUtil::waitForEnter();
                 break;
             }
             case 10: {
-                runKFold(trainingData, true, classPairsOut);
+                runKFold(trainingData, classPairsOut, true);
                 PrintingUtil::waitForEnter();
                 break;
             }
@@ -1080,12 +1517,12 @@ void runInteractive() {
                 // Export 1-1 Hyperblocks
                 cout << "Enter the file to save HyperBlocks to: " << endl;
                 getline(cin, hyperBlocksExportFileName);
-                DataUtil::saveOneToOneHBsToBinary(oneToOneBlocks, hyperBlocksExportFileName, FIELD_LENGTH);
+                DataUtil::saveOneToOneHBsToBinary(oneToOneBlocks, hyperBlocksExportFileName);
                 break;
             }
             case 14: {
                 // RUN K FOLD FOR THE ONE TO ONE TYPE BLOCKS.
-                runKFold(trainingData, false, classPairsOut);
+                runKFold(trainingData,  classPairsOut);
                 PrintingUtil::waitForEnter();
                 break;
             }
@@ -1140,10 +1577,14 @@ void runInteractive() {
                     return;
                 }
 
-                findBestParameters(trainingData, maxRemoval, maxK);
+                //findBestParameters(trainingData, maxRemoval, maxK);
                 PrintingUtil::waitForEnter();
                 break;
             }
+            case 17:
+                DataUtil::splitTrainTestByPercent(trainingData, testData, .8);
+                PrintingUtil::waitForEnter();
+                break;
             default: {
                 cout << "\nInvalid choice. Please try again." << endl;
                 PrintingUtil::waitForEnter();

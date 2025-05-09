@@ -169,7 +169,7 @@ std::vector<std::vector<long>> Knn::closestBlock(std::vector<std::vector<std::ve
 
     return regularConfusionMatrix;
 }
-*/
+
 
 
 

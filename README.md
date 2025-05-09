@@ -15,3 +15,66 @@ Run:
     ./a
     or
     ./a.exe
+
+
+Options:
+
+Data Handling
+
+    Import Data:    
+        itrain
+        itest
+
+    Save normalized training data:
+        
+        sntrain
+        sntest
+
+    Import HyperBlocks
+
+        ihbmany
+        ihbone
+
+    Export Hyperblocks
+
+        exmany
+        exone
+
+    Split Dataset
+
+        spset
+
+
+    
+
+
+
+
+
+Generation
+
+    gmany  - Generate one-to-many Hyperblocks, the original blocks.
+    gone   - Generate one-to-one Hyperblocks, ex n choose 2 binary classifiers a:b a:c b:c
+
+Simplifications
+
+    rnsimp  - Run the combined simplifications function we have pre-made. 
+
+
+Testing
+
+    tmany   - Test one to many blocks on the testing set.
+    tone    - Test one to one blocks on the testing set.
+
+KFold
+
+    kfone
+    kfmany
+
+
+
+
+
+
+
+

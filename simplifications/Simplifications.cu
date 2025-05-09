@@ -237,14 +237,14 @@ std::vector<int> Simplifications::runSimplifications(std::vector<HyperBlock> &hy
     int totalClauses = 0;
     int updatedClauses = 0;
 
-    do{
+    //do{
         // set our count of what we have to start
         totalClauses = updatedClauses;
         runCount++; // counter so we can show how many iterations this took.
 
         // simplification functions
         Simplifications::removeUselessAttr(hyperBlocks, trainData, bestAttributeOrderings);
-        Simplifications::removeUselessBlocks(trainData, hyperBlocks);
+        //Simplifications::removeUselessBlocks(trainData, hyperBlocks);
 
         // count how many we have after simplifications.
         updatedClauses = 0;
@@ -256,9 +256,10 @@ std::vector<int> Simplifications::runSimplifications(std::vector<HyperBlock> &hy
                 else
                     updatedClauses += hyperBlock.minimums[i].size();
             }
+
         }
 
-    // iteratively call the simplifications until we don't remove any more clauses.
-    } while(updatedClauses != totalClauses);
-    return { runCount, totalClauses };
+    //// iteratively call the simplifications until we don't remove any more clauses.
+//} while(updatedClauses != totalClauses);
+    return { runCount, updatedClauses };
 }
