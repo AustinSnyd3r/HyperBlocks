@@ -2,6 +2,8 @@
 // Created by Austin Snyder on 3/20/2025.
 //
 #include "DataUtil.h"
+
+#include <climits>
 extern int FIELD_LENGTH;
 extern int NUM_CLASSES;
 
@@ -799,6 +801,7 @@ vector<vector<float>> DataUtil::flattenMinsMaxesForRUB(vector<HyperBlock>& hyper
     vector<float> flatMaxesList;
     vector<float> blockEdges;
     vector<float> blockClasses(hyper_blocks.size());
+    vector<float> intervalCounts;
 
     // First block starts at index 0
     blockEdges.push_back(0.0f);
@@ -815,6 +818,7 @@ vector<vector<float>> DataUtil::flattenMinsMaxesForRUB(vector<HyperBlock>& hyper
             // The number of intervals for the attribute
             float numIntervals = static_cast<float>(block.minimums[m].size());
             blockLength += block.minimums[m].size();
+            intervalCounts.push_back(numIntervals);
             // Push the number of intervals first, as in the Java version
             flatMinsList.push_back(numIntervals);
             flatMaxesList.push_back(numIntervals);
@@ -832,6 +836,7 @@ vector<vector<float>> DataUtil::flattenMinsMaxesForRUB(vector<HyperBlock>& hyper
     result.push_back(move(flatMaxesList));
     result.push_back(move(blockEdges));
     result.push_back(move(blockClasses));
+    result.push_back(move(intervalCounts));
     return result;
 }
 

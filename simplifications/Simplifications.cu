@@ -149,7 +149,7 @@ void Simplifications::removeUselessAttrNoDisjunction(vector<HyperBlock>& hyper_b
     for (size_t i = 0; i < fDataResult[1].size(); i++) {
         classBorder[i] = static_cast<int>(fDataResult[1][i]);
     }
-    int numClasses = static_cast<int>(hyper_blocks.size());
+    int numClasses = static_cast<int>(data.size());
 
     std::vector<int> attributeOrderingsFlattened(attributeOrderings.size() * FIELD_LENGTH, 0);
     for (int i = 0; i < attributeOrderings.size(); i++) {
@@ -198,8 +198,7 @@ void Simplifications::removeUselessAttrNoDisjunction(vector<HyperBlock>& hyper_b
     gridSize = (numBlocks + blockSize - 1) / blockSize;
 
     // Launch the kernel.
-    removeUselessAttributesNoDisjunctions<<<gridSize, blockSize>>>(d_mins, d_maxes, numBlocks, FIELD_LENGTH, d_blockClasses, d_dataset, numPoints, d_classBorder, numClasses, d_attributeOrderingsFlattened);
-    //removeUselessAttributesNoDisjunctions(float *mins, float *maxes, const int numBlocks, const int FIELD_LENGTH, const int *blockClasses, const float *dataset, const int numPoints, const int *classBorder, const int numClasses, const int *attributeOrder){
+    removeUselessAttributesNoDisjunctions<<<gridSize, blockSize>>>(d_mins, d_maxes, numBlocks, FIELD_LENGTH, d_blockClasses, d_dataset, numPoints, d_classBorder, d_attributeOrderingsFlattened);
 
     cudaDeviceSynchronize();
 
@@ -243,7 +242,7 @@ void Simplifications::removeUselessAttr(std::vector<HyperBlock>& hyper_blocks, s
     int FIELD_LENGTH = data[0][0].size();
 
     // Prepare host data by flattening your data structures.
-    auto fMinMaxResult =  DataUtil::flatMinMaxNoEncode(hyper_blocks, FIELD_LENGTH);
+    auto fMinMaxResult =  DataUtil::flattenMinsMaxesForRUB(hyper_blocks, FIELD_LENGTH);
     auto fDataResult =  DataUtil::flattenDataset(data);
 
     // Build host arrays from the flattened results:
@@ -362,7 +361,6 @@ void Simplifications::removeUselessAttr(std::vector<HyperBlock>& hyper_blocks, s
         }
     }
 }
-
 
 vector<int> Simplifications::runSimplifications(vector<HyperBlock> &hyperBlocks, vector<vector<vector<float>>> &trainData, vector<vector<int>> &bestAttributeOrderings){
     int FIELD_LENGTH = trainData[0][0].size();

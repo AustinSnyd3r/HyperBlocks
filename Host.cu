@@ -1127,56 +1127,27 @@ void runInteractive() {
              
                 // testing for time and to determine if they are doing the same.
                 auto start = chrono::high_resolution_clock::now();
-                vector<HyperBlock> simpleVersionBlocks = hyperBlocks;
-                removeUselessAttrNoDisjunction(simpleVersionBlocks, trainingData, bestVectorsIndexes);
+                Simplifications::removeUselessAttrNoDisjunction(hyperBlocks, trainingData, bestVectorsIndexes);
                 auto end = chrono::high_resolution_clock::now();
                 chrono::duration<double> diff = end - start;
-                cout << "Time taken (new version): " << diff.count() << " seconds" << endl;
-
-
-                start = chrono::high_resolution_clock::now();
-                Simplifications::removeUselessAttr(hyperBlocks, trainingData, bestVectorsIndexes);
-                end = chrono::high_resolution_clock::now();
-                diff = end - start;
-                cout << "Time taken (old version): " << diff.count() << " seconds" << endl;
+                cout << "Time taken: " << diff.count() << " seconds" << endl;
 
                 int newClauseCount = 0;
-                for (const auto &hb : simpleVersionBlocks) {
+                for (const auto &hb : hyperBlocks) {
                     for (int a = 0; a < FIELD_LENGTH; a++) {
                         if (hb.minimums[a][0] != 0.0f || hb.maximums[a][0] != 1.0f)
                             newClauseCount++;
                     }
                 }
 
-                int oldClauseCount = 0;
-                for (const auto &hb : hyperBlocks) {
-                    for (int a = 0; a < FIELD_LENGTH; a++) {
-                        if (hb.minimums[a][0] != 0.0f || hb.maximums[a][0] != 1.0f)
-                            oldClauseCount++;
-                    }
-                }
-
-
                 cout << "New clause count: " << newClauseCount << endl;
-                cout << "Old clause count: " << oldClauseCount << endl;
-
-                /*
-                vector<int> result = Simplifications::runSimplifications(hyperBlocks, trainingData, bestVectorsIndexes);
-                
 
                 int totalPoints = 0;
-
                 for (const auto &c : trainingData) totalPoints += c.size();
 
                 cout << "After removing useless blocks we have: " << newClauseCount << " clauses\n";
                 cout << "We got a final total of: " << hyperBlocks.size() << " blocks." << endl;
                 cout << "We had: " << totalPoints << " points of training data\n";
-                for (const auto &c : trainingData) totalPoints += c.size();
-
-                cout << "After removing useless blocks we have: " << result[1] << " clauses\n";
-                cout << "We got a final total of: " << hyperBlocks.size() << " blocks." << endl;
-                cout << "We had: " << totalPoints << " points of training data\n";
-                */
                 PrintingUtil::waitForEnter();
                 break;
             }

@@ -91,7 +91,7 @@ a.exe
 
 - **Compile**:
 ```bash
-nvcc -Xcompiler -fopenmp -o a ./Host.cu ./hyperblock/HyperBlock.cpp ./hyperblock_generation/MergerHyperBlock.cu ./data_utilities/DataUtil.cpp ./interval_hyperblock/IntervalHyperBlock.cu ./knn/Knn.cpp ./screen_output/PrintingUtil.cpp ./simplifications/Simplifications.cu ./classification_testing/ClassificationTests.cpp -g -G -O3
+nvcc -Xcompiler -fopenmp -o a ./Host.cu ./hyperblock/HyperBlock.cpp ./hyperblock_generation/MergerHyperBlock.cu ./data_utilities/DataUtil.cpp ./interval_hyperblock/IntervalHyperBlock.cu ./knn/Knn.cpp ./screen_output/PrintingUtil.cpp ./simplifications/Simplifications.cu ./classification_testing/ClassificationTests.cpp -g -G -O3 --relocatable-device-code=true
 ```
 
 - **Run**:
